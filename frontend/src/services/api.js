@@ -1,6 +1,6 @@
 // Client API Service for Gemini Food Recognition
 
-const BACKEND_URL = ''; // Proxied by Vite to http://localhost:8000
+const BACKEND_URL = import.meta.env.VITE_API_URL || ''; // Proxied by Vite to http://localhost:8000
 
 // Fallback client mocks if backend server is not running
 const CLIENT_FALLBACK_MEALS = [
