@@ -1,14 +1,22 @@
 # NutriLens AI - Calorie & Nutrition Tracker
 
-A full-stack, multimodal AI Calorie and Nutrition Tracker web application built with **Python FastAPI** and **React (Vite) + Tailwind CSS**, powered by the Google GenAI SDK (`gemini-2.5-flash`) with structured outputs for real-time plate decomposition, macro estimation, and dynamic nutrition coaching.
+[![Live Demo](https://img.shields.io/badge/Demo-Live_on_Vercel-success?style=for-the-badge&logo=vercel)](https://calorie-tracker-theta-lemon.vercel.app/)
+[![React](https://img.shields.io/badge/Frontend-React_19_+_Vite-blue?style=for-the-badge&logo=react)](https://calorie-tracker-theta-lemon.vercel.app/)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://calorie-tracker-theta-lemon.vercel.app/)
+[![Gemini](https://img.shields.io/badge/AI-Google_Gemini-8E75C2?style=for-the-badge&logo=googlegemini)](https://calorie-tracker-theta-lemon.vercel.app/)
+
+> **🌐 Live Deployment:** [https://calorie-tracker-theta-lemon.vercel.app/](https://calorie-tracker-theta-lemon.vercel.app/)
+
+A full-stack, multimodal AI Calorie and Nutrition Tracker web application built with **Python FastAPI** and **React (Vite) + Tailwind CSS**, powered by the Google GenAI SDK (`gemini-3.5-flash`) with structured outputs for real-time plate decomposition, macro estimation, and dynamic nutrition coaching.
 
 ---
 
 ## Highlights & Features
 
-- **Multimodal AI Plate Decomposition (`gemini-2.5-flash`)**:
+- **Multimodal AI Plate Decomposition (`gemini-3.5-flash`)**:
   - Upload a meal photo, snap directly using HTML5 camera (`facingMode: "environment"`), or enter descriptive food notes.
   - Automatically identifies, separates, and decomposes complex plates into distinct food components with estimated portions and macros.
+  - Dynamic fallback architecture ensures high-throughput reliability across `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-flash-lite-latest`.
 - **USP 1: Interactive Multi-Item Plate Editor**:
   - Review decomposed plate components prior to logging.
   - Adjust portion multipliers (`0.75x`, `1.25x`, `1.5x`), edit macros inline, remove false detections, or add missing ingredients with live recalculation.
@@ -22,7 +30,7 @@ A full-stack, multimodal AI Calorie and Nutrition Tracker web application built 
   - Multi-day calendar navigator (`YYYY-MM-DD`).
   - Offline-ready `localStorage` persistence with one-click JSON backup export and restore.
 - **Graceful Fallback**:
-  - Includes a fallback mock engine so the UI works immediately for development and testing even before a Gemini API key is configured.
+  - Includes a fallback mock engine so the UI works seamlessly for development and testing even before a Gemini API key is configured or when offline.
 
 ---
 
@@ -76,7 +84,7 @@ cp .env.example .env
 Add your Google Gemini API Key:
 ```env
 GEMINI_API_KEY=your_actual_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.5-flash
 HOST=0.0.0.0
 PORT=8000
 ```
@@ -115,6 +123,20 @@ Open your browser at `http://localhost:5173`.
 
 ---
 
+## Live Deployment (Vercel)
+
+The frontend is deployed on Vercel at:
+👉 **[https://calorie-tracker-theta-lemon.vercel.app/](https://calorie-tracker-theta-lemon.vercel.app/)**
+
+### Building Frontend for Production
+```bash
+cd frontend
+npm run build
+```
+Build output is saved to `/frontend/dist/`.
+
+---
+
 ## API Endpoints
 
 ### `GET /health`
@@ -123,7 +145,7 @@ Returns service status and Gemini API key configuration:
 {
   "status": "healthy",
   "gemini_configured": true,
-  "model": "gemini-2.5-flash"
+  "model": "gemini-3.5-flash"
 }
 ```
 
@@ -172,13 +194,3 @@ Multimodal food analysis endpoint:
   "coach_tip": "Great high-protein vegetarian meal! Pair with a squeeze of fresh lemon to boost iron absorption from the veggies."
 }
 ```
-
----
-
-## Verification & Build
-To build the frontend for production:
-```bash
-cd frontend
-npm run build
-```
-Build output is saved to `/frontend/dist/`.
