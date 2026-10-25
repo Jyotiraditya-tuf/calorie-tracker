@@ -8,7 +8,8 @@ import {
   AlertCircle, 
   Check, 
   FlipHorizontal,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Smartphone
 } from 'lucide-react';
 
 export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategory = 'Lunch' }) {
@@ -20,9 +21,11 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
   const [cameraError, setCameraError] = useState(null);
   const [facingMode, setFacingMode] = useState('environment'); // back camera default
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isStartingStream, setIsStartingStream] = useState(false);
 
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
+  const nativeCameraInputRef = useRef(null);
 
   // Initialize camera when opened
   useEffect(() => {
@@ -40,41 +43,91 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
 
   const startCamera = async () => {
     setCameraError(null);
+    setIsStartingStream(true);
+    
+    // Check if mediaDevices API is available
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCameraError("WebRTC camera stream not supported by this browser. Use the native camera button below.");
+      setIsStartingStream(false);
+      setStreamActive(false);
+      return;
+    }
+
     try {
       if (videoRef.current && videoRef.current.srcObject) {
         stopCamera();
       }
 
-      const constraints = {
-        video: {
-          facingMode: facingMode,
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      };
+      let stream = null;
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      if (videoRef.current) {
+      // Attempt 1: Flexible ideal facingMode without restrictive resolution locks
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: facingMode }
+          },
+          audio: false
+        });
+      } catch (err1) {
+        console.warn("Attempt 1 (ideal facingMode) failed, trying fallback constraints...", err1);
+        // Attempt 2: Exact string facingMode or general video
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: facingMode },
+            audio: false
+          });
+        } catch (err2) {
+          console.warn("Attempt 2 (string facingMode) failed, trying generic video...", err2);
+          // Attempt 3: Any video device
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+        }
+      }
+
+      if (videoRef.current && stream) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setStreamActive(true);
+        videoRef.current.muted = true;
+        videoRef.current.setAttribute('playsinline', 'true');
+        
+        videoRef.current.onloadedmetadata = async () => {
+          try {
+            await videoRef.current?.play();
+            setStreamActive(true);
+            setCameraError(null);
+          } catch (playErr) {
+            console.warn("Auto-play error on mobile:", playErr);
+            // Some mobile browsers need explicit user touch to play video
+            setStreamActive(true);
+          }
+        };
       }
     } catch (err) {
-      console.warn("Unable to access camera:", err);
-      setCameraError(
-        err.name === 'NotAllowedError' 
-          ? "Camera permission denied. You can still upload a photo or type food items below."
-          : "Camera not available on this device. Please upload a meal photo or type items below."
-      );
+      console.warn("Unable to access camera stream:", err);
+      let message = "Camera permission denied or camera unavailable.";
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        message = "Camera access was denied. Tap 'Take Photo' below to use your phone's native camera.";
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        message = "No camera hardware detected. You can upload an image or describe your meal.";
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        message = "Camera is currently in use by another app. Tap 'Take Photo' for native camera.";
+      }
+      setCameraError(message);
       setStreamActive(false);
+    } finally {
+      setIsStartingStream(false);
     }
   };
 
   const stopCamera = () => {
     if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
+      try {
+        const tracks = videoRef.current.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+      } catch (e) {
+        console.warn("Error stopping stream tracks:", e);
+      }
       videoRef.current.srcObject = null;
     }
     setStreamActive(false);
@@ -88,7 +141,7 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
     setIsSubmitting(false);
   };
 
-  // Capture current frame from video to canvas
+  // Capture current frame from WebRTC video to canvas
   const handleSnap = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
@@ -107,7 +160,7 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
     }, 'image/jpeg', 0.9);
   };
 
-  // Handle uploaded file from disk
+  // Handle uploaded or captured image from input (native camera or file)
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -119,6 +172,8 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
       reader.readAsDataURL(file);
       stopCamera();
     }
+    // Reset file input value so same photo can be re-selected if retried
+    e.target.value = '';
   };
 
   // Switch between front/rear camera
@@ -171,7 +226,7 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
                 Log Meal with AI
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Snap photo or describe your plate
+                Live camera, phone snapshot, or describe your plate
               </p>
             </div>
           </div>
@@ -203,7 +258,7 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
               </button>
             </div>
           ) : streamActive ? (
-            /* Live Camera Feed */
+            /* Live WebRTC Camera Feed */
             <div className="relative w-full h-full">
               <video
                 ref={videoRef}
@@ -220,18 +275,28 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
                 </div>
               </div>
 
-              {/* Camera flip button */}
-              <button
-                type="button"
-                onClick={toggleFacingMode}
-                className="absolute top-3 right-3 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 backdrop-blur-sm transition-all"
-                title="Switch Camera"
-              >
-                <FlipHorizontal className="w-4 h-4" />
-              </button>
+              {/* Camera flip & phone native buttons */}
+              <div className="absolute top-3 right-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => nativeCameraInputRef.current?.click()}
+                  className="p-2 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-sm transition-all"
+                  title="Open Phone Camera App"
+                >
+                  <Smartphone className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleFacingMode}
+                  className="p-2 rounded-full bg-black/60 text-white hover:bg-black/80 backdrop-blur-sm transition-all"
+                  title="Switch Camera (Front/Back)"
+                >
+                  <FlipHorizontal className="w-4 h-4" />
+                </button>
+              </div>
 
-              {/* Shutter Button */}
-              <div className="absolute bottom-4 inset-x-0 flex justify-center items-center gap-6">
+              {/* Shutter Button & Fallbacks */}
+              <div className="absolute bottom-4 inset-x-0 flex justify-center items-center gap-4">
                 <button
                   type="button"
                   onClick={handleSnap}
@@ -243,37 +308,61 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
               </div>
             </div>
           ) : (
-            /* Camera Unavailable or Off - Fallback Upload View */
-            <div className="p-6 text-center flex flex-col items-center justify-center text-slate-300">
+            /* Camera Unavailable or Off - Mobile Friendly Choice View */
+            <div className="p-6 text-center flex flex-col items-center justify-center text-slate-300 w-full max-w-sm">
               <div className="w-14 h-14 rounded-2xl bg-slate-800/80 flex items-center justify-center text-emerald-400 mb-3 border border-slate-700">
-                <ImageIcon className="w-7 h-7" />
+                <Camera className="w-7 h-7" />
               </div>
               <p className="text-sm font-semibold text-slate-200 mb-1">
-                {cameraError ? "Camera Access Offline" : "Live Camera Standby"}
+                {cameraError ? "Camera Permissions / Standby" : "Capture Food Photo"}
               </p>
               <p className="text-xs text-slate-400 max-w-xs mb-4">
-                {cameraError || "Upload a photo from your gallery or use manual text context below."}
+                {cameraError || "Take a live photo using your phone camera or select from your gallery."}
               </p>
               
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full">
+                {/* Dedicated Native Camera Button (uses capture="environment" on phones) */}
+                <button
+                  type="button"
+                  onClick={() => nativeCameraInputRef.current?.click()}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md active:scale-95"
+                >
+                  <Camera className="w-4 h-4" /> Take Photo (Camera)
+                </button>
+
+                {/* Gallery File Selector Button */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md"
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all border border-slate-700 active:scale-95"
                 >
-                  <Upload className="w-4 h-4" /> Upload Meal Photo
+                  <Upload className="w-4 h-4" /> Photo Gallery
                 </button>
+              </div>
+
+              {cameraError && (
                 <button
                   type="button"
                   onClick={startCamera}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all"
+                  className="mt-3 flex items-center gap-1.5 text-[11px] text-emerald-400 hover:underline"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" /> Try Camera
+                  <RefreshCw className="w-3 h-3" /> Retry Live Web Stream
                 </button>
-              </div>
+              )}
             </div>
           )}
 
+          {/* Native Phone Camera Input (Direct mobile camera trigger) */}
+          <input
+            ref={nativeCameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+
+          {/* Standard Gallery File Input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -315,18 +404,25 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 Food Context / Manual Entry
                 <span className="text-[10px] font-normal text-slate-400">
-                  {capturedBlob ? "(Optional notes)" : "(Type your meal)"}
+                  {capturedBlob ? "(Optional notes)" : "(Type dishes e.g. Moong Dal, Dosa)"}
                 </span>
               </label>
-              {!capturedBlob && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => nativeCameraInputRef.current?.click()}
+                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 font-medium"
+                >
+                  <Camera className="w-3 h-3" /> Camera
+                </button>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 font-medium"
+                  className="text-xs text-slate-500 dark:text-slate-400 hover:underline flex items-center gap-1 font-medium"
                 >
-                  <Upload className="w-3 h-3" /> Upload Photo
+                  <Upload className="w-3 h-3" /> Gallery
                 </button>
-              )}
+              </div>
             </div>
 
             <div className="relative">
@@ -334,7 +430,7 @@ export default function CameraModal({ isOpen, onClose, onAnalyze, initialCategor
                 value={userContext}
                 onChange={(e) => setUserContext(e.target.value)}
                 rows={2}
-                placeholder="e.g. 200g grilled paneer with brown basmati rice and 1 tsp olive oil..."
+                placeholder="e.g. 1 bowl yellow moong dal tadka with 2 rotis and curd..."
                 className="w-full text-xs sm:text-sm rounded-xl p-3 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all resize-none"
               />
             </div>
