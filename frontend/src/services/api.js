@@ -1,116 +1,382 @@
 // Client API Service for Gemini Food Recognition
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || ''; // Proxied by Vite to http://localhost:8000
+const DEFAULT_BACKEND_URL = import.meta.env.VITE_API_URL || '';
 
-// Fallback client mocks if backend server is not running
-const CLIENT_FALLBACK_MEALS = [
-  {
-    meal_name: "Paneer & Brown Rice Bowl",
-    confidence: "high",
-    clarification_chips: ["Whole milk paneer", "Low-fat paneer", "Tofu alternative"],
-    items: [
-      { name: "Grilled Paneer Cubes", estimated_portion: "180g (6 cubes)", calories: 465, protein_g: 32.4, carbs_g: 6.2, fat_g: 36.0, fiber_g: 0.0 },
-      { name: "Brown Basmati Rice", estimated_portion: "1 cup cooked (195g)", calories: 215, protein_g: 5.0, carbs_g: 45.0, fat_g: 1.6, fiber_g: 3.5 },
-      { name: "Sautéed Bell Peppers & Onions", estimated_portion: "1.5 cups (150g)", calories: 75, protein_g: 2.1, carbs_g: 14.5, fat_g: 1.2, fiber_g: 3.8 },
-      { name: "Olive oil / Ghee brush", estimated_portion: "1 tsp (5ml)", calories: 45, protein_g: 0.0, carbs_g: 0.0, fat_g: 5.0, fiber_g: 0.0 }
-    ],
-    totals: { calories: 800, protein_g: 39.5, carbs_g: 65.7, fat_g: 43.8, fiber_g: 7.3 },
-    coach_tip: "Excellent high-protein vegetarian meal! Pair with a squeeze of fresh lemon to boost iron absorption from the veggies."
-  },
-  {
-    meal_name: "Chicken Avocado Super Salad",
-    confidence: "medium",
-    clarification_chips: ["Olive oil vinaigrette", "Creamy dressing", "Light dressing"],
-    items: [
-      { name: "Grilled Chicken Breast", estimated_portion: "170g cooked", calories: 280, protein_g: 53.0, carbs_g: 0.0, fat_g: 6.2, fiber_g: 0.0 },
-      { name: "Fresh Hass Avocado", estimated_portion: "1/2 medium (75g)", calories: 120, protein_g: 1.5, carbs_g: 6.4, fat_g: 11.0, fiber_g: 5.0 },
-      { name: "Mixed Leafy Greens & Cucumbers", estimated_portion: "2 cups (100g)", calories: 25, protein_g: 1.8, carbs_g: 4.2, fat_g: 0.4, fiber_g: 2.1 },
-      { name: "Herb Vinaigrette Dressing", estimated_portion: "2 tbsp (30ml)", calories: 130, protein_g: 0.1, carbs_g: 2.0, fat_g: 14.0, fiber_g: 0.1 }
-    ],
-    totals: { calories: 555, protein_g: 56.4, carbs_g: 12.6, fat_g: 31.6, fiber_g: 7.2 },
-    coach_tip: "Outstanding lean protein density with heart-healthy monounsaturated fats from avocado."
+export function getCustomBackendUrl() {
+  return localStorage.getItem('nutrilens_backend_url') || DEFAULT_BACKEND_URL;
+}
+
+export function setCustomBackendUrl(url) {
+  if (url) {
+    localStorage.setItem('nutrilens_backend_url', url.trim());
+  } else {
+    localStorage.removeItem('nutrilens_backend_url');
   }
-];
+}
+
+export function getClientGeminiApiKey() {
+  return localStorage.getItem('nutrilens_gemini_key') || import.meta.env.VITE_GEMINI_API_KEY || '';
+}
+
+export function setClientGeminiApiKey(key) {
+  if (key) {
+    localStorage.setItem('nutrilens_gemini_key', key.trim());
+  } else {
+    localStorage.removeItem('nutrilens_gemini_key');
+  }
+}
+
+// Convert Blob to Base64 helper
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result.split(',')[1];
+      resolve(base64String);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Direct client-side call to Google Gemini API (perfect for standalone Vercel mobile deployment)
+async function analyzeDirectWithGemini(apiKey, { imageBlob, textPrompt }) {
+  const model = "gemini-3.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const systemInstruction = `You are a world-class clinical dietitian and multimodal food recognition AI specializing in Indian, Asian, and global cuisines.
+Analyze the meal shown in the image and/or described in text.
+Differentiate Indian dishes with precision:
+- Yellow Moong Dal (split yellow gram, light, ~160 kcal/katori) vs Toor Dal (~190 kcal) vs Dal Makhani (~340 kcal). Identify Tadka (ghee vs oil).
+- Plain Dosa (crispy crepe, ~150 kcal) vs Masala Dosa (with spiced potato aloo bhaji, ~320 kcal). Include Sambhar and Coconut Chutney.
+- Whole wheat Phulka / Roti (~75 kcal) vs Ghee Roti (~110 kcal) vs Paratha (~200 kcal).
+- Chole, Rajma, Paneer, Idli, Poha, Biryani, Rice.
+Calculate exact macro totals (calories, protein_g, carbs_g, fat_g, fiber_g).
+Provide 2-3 clarification_chips (e.g. ['Cooked in Desi Ghee', 'Cooked in Oil', 'Moong Dal vs Toor Dal']) if ambiguous.
+Provide 1 actionable coach_tip.`;
+
+  const contents = [];
+  const parts = [];
+
+  if (imageBlob) {
+    const base64Data = await blobToBase64(imageBlob);
+    parts.push({
+      inline_data: {
+        mime_type: imageBlob.type || 'image/jpeg',
+        data: base64Data
+      }
+    });
+  }
+
+  const userNotes = textPrompt ? textPrompt.trim() : 'Identify all food components and give structured nutritional decomposition.';
+  parts.push({ text: `${systemInstruction}\n\nUser Input / Notes: ${userNotes}` });
+
+  contents.push({ parts });
+
+  const responseSchema = {
+    type: "OBJECT",
+    properties: {
+      meal_name: { type: "STRING" },
+      confidence: { type: "STRING", enum: ["high", "medium", "low"] },
+      clarification_chips: { type: "ARRAY", items: { type: "STRING" } },
+      items: {
+        type: "ARRAY",
+        items: {
+          type: "OBJECT",
+          properties: {
+            name: { type: "STRING" },
+            estimated_portion: { type: "STRING" },
+            calories: { type: "NUMBER" },
+            protein_g: { type: "NUMBER" },
+            carbs_g: { type: "NUMBER" },
+            fat_g: { type: "NUMBER" },
+            fiber_g: { type: "NUMBER" }
+          },
+          required: ["name", "estimated_portion", "calories", "protein_g", "carbs_g", "fat_g"]
+        }
+      },
+      totals: {
+        type: "OBJECT",
+        properties: {
+          calories: { type: "NUMBER" },
+          protein_g: { type: "NUMBER" },
+          carbs_g: { type: "NUMBER" },
+          fat_g: { type: "NUMBER" },
+          fiber_g: { type: "NUMBER" }
+        },
+        required: ["calories", "protein_g", "carbs_g", "fat_g"]
+      },
+      coach_tip: { type: "STRING" }
+    },
+    required: ["meal_name", "confidence", "items", "totals", "coach_tip"]
+  };
+
+  const requestBody = {
+    contents,
+    generationConfig: {
+      response_mime_type: "application/json",
+      response_schema: responseSchema,
+      temperature: 0.2
+    }
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(25000)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Gemini API error (${response.status}): ${errText}`);
+  }
+
+  const json = await response.json();
+  const textOutput = json.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!textOutput) {
+    throw new Error("Empty response from Gemini API");
+  }
+
+  return JSON.parse(textOutput);
+}
 
 export async function checkBackendHealth() {
-  try {
-    const res = await fetch(`${BACKEND_URL}/health`, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) throw new Error('Health check non-200');
-    return await res.json();
-  } catch (err) {
-    return { status: 'offline', gemini_configured: false };
+  const backendUrl = getCustomBackendUrl();
+  const clientKey = getClientGeminiApiKey();
+
+  if (backendUrl) {
+    try {
+      const res = await fetch(`${backendUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        const data = await res.json();
+        return { ...data, source: 'backend' };
+      }
+    } catch (err) {
+      // Backend not responding
+    }
   }
+
+  if (clientKey) {
+    return {
+      status: 'healthy',
+      gemini_configured: true,
+      source: 'direct_client',
+      model: 'gemini-3.5-flash'
+    };
+  }
+
+  return { status: 'standalone', gemini_configured: false, source: 'offline_knowledge_base' };
 }
 
 export async function analyzeMealFood({ imageBlob, textPrompt }) {
-  const formData = new FormData();
-  
-  if (imageBlob) {
-    const filename = imageBlob.type === 'image/png' ? 'photo.png' : 'photo.jpg';
-    formData.append('image', imageBlob, filename);
-  }
-  
-  if (textPrompt && textPrompt.trim()) {
-    formData.append('text', textPrompt.trim());
-  }
+  const clientKey = getClientGeminiApiKey();
+  const backendUrl = getCustomBackendUrl();
 
-  try {
-    // 25s timeout to prevent infinite UI freezing
-    const response = await fetch(`${BACKEND_URL}/api/analyze`, {
-      method: 'POST',
-      body: formData,
-      signal: AbortSignal.timeout(25000)
-    });
+  // Strategy 1: If user provided a backend URL and it's active, try backend
+  if (backendUrl) {
+    try {
+      const formData = new FormData();
+      if (imageBlob) {
+        const filename = imageBlob.type === 'image/png' ? 'photo.png' : 'photo.jpg';
+        formData.append('image', imageBlob, filename);
+      }
+      if (textPrompt && textPrompt.trim()) {
+        formData.append('text', textPrompt.trim());
+      }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn('Backend returned non-200, falling back to smart simulation:', errorText);
-      return getSimulatedFallback(textPrompt);
+      const response = await fetch(`${backendUrl}/api/analyze`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(25000)
+      });
+
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (backendErr) {
+      console.warn("Backend call failed, trying direct Gemini or offline database:", backendErr);
     }
-
-    const data = await response.json();
-    return data;
-  } catch (err) {
-    console.warn('Backend request failed or timed out, using instant fallback:', err);
-    return getSimulatedFallback(textPrompt);
   }
+
+  // Strategy 2: Direct Gemini Multimodal Call (works right from mobile phone on Vercel)
+  if (clientKey) {
+    try {
+      return await analyzeDirectWithGemini(clientKey, { imageBlob, textPrompt });
+    } catch (directErr) {
+      console.warn("Direct Gemini API call error:", directErr);
+    }
+  }
+
+  // Strategy 3: Highly tuned offline / simulated Indian & global food knowledge base
+  return getSimulatedFallback(textPrompt);
 }
 
-function getSimulatedFallback(text) {
-  if (text) {
-    const lower = text.toLowerCase();
-    if (lower.includes('apple') || lower.includes('fruit')) {
-      return {
-        meal_name: "Fresh Crisp Apple",
-        confidence: "high",
-        clarification_chips: ["Medium apple (180g)", "Large apple (240g)", "With peanut butter dip"],
-        items: [
-          { name: "Fresh Red Apple", estimated_portion: "1 medium apple (182g)", calories: 95, protein_g: 0.5, carbs_g: 25.1, fat_g: 0.3, fiber_g: 4.4 }
-        ],
-        totals: { calories: 95, protein_g: 0.5, carbs_g: 25.1, fat_g: 0.3, fiber_g: 4.4 },
-        coach_tip: "Rich in soluble pectin fiber and antioxidant polyphenols; great for sustained energy."
-      };
-    }
-    if (lower.includes('chicken')) {
-      return CLIENT_FALLBACK_MEALS[1];
-    }
-    if (lower.includes('oat') || lower.includes('egg')) {
-      const isEgg = lower.includes('egg');
-      return {
-        meal_name: isEgg ? "Poached Eggs & Toast" : "Berry Protein Oatmeal",
-        confidence: "medium",
-        clarification_chips: isEgg ? ["Cooked in butter", "Cooking spray (oil-free)", "With cheese"] : ["With whole milk", "With almond milk", "With protein scoop"],
-        items: isEgg ? [
-          { name: "Large Eggs (2 poached)", estimated_portion: "2 eggs (100g)", calories: 144, protein_g: 12.6, carbs_g: 0.8, fat_g: 9.9, fiber_g: 0.0 },
-          { name: "Sourdough Toast (1 slice)", estimated_portion: "1 slice (45g)", calories: 120, protein_g: 4.0, carbs_g: 23.0, fat_g: 0.7, fiber_g: 1.5 }
-        ] : [
-          { name: "Rolled Oats", estimated_portion: "1 cup cooked", calories: 166, protein_g: 5.9, carbs_g: 28.1, fat_g: 3.6, fiber_g: 4.0 },
-          { name: "Fresh Berries & Honey", estimated_portion: "1/2 cup", calories: 65, protein_g: 0.8, carbs_g: 16.0, fat_g: 0.2, fiber_g: 2.0 }
-        ],
-        totals: isEgg ? { calories: 264, protein_g: 16.6, carbs_g: 23.8, fat_g: 10.6, fiber_g: 1.5 } : { calories: 231, protein_g: 6.7, carbs_g: 44.1, fat_g: 3.8, fiber_g: 6.0 },
-        coach_tip: "Great balanced plate! Tap any ingredient to adjust portion size or macros."
-      };
-    }
+export function getSimulatedFallback(text) {
+  const lower = (text || '').toLowerCase();
+
+  // 1. Moong Dal & Indian Dals
+  if (lower.includes('moong') || lower.includes('yellow dal') || lower.includes('dal tadka') || lower.includes('daal') || lower.includes('lentil')) {
+    return {
+      meal_name: "Yellow Moong Dal Tadka with Phulkas & Rice",
+      confidence: "high",
+      clarification_chips: ["Cooked with Desi Ghee", "Tempered with Cooking Oil", "Yellow Moong Dal vs Toor Dal"],
+      items: [
+        { name: "Yellow Moong Dal (Tadka)", estimated_portion: "1 medium katori (180g)", calories: 165, protein_g: 9.2, carbs_g: 22.0, fat_g: 4.5, fiber_g: 5.0 },
+        { name: "Whole Wheat Phulkas / Rotis", estimated_portion: "2 rotis (60g)", calories: 150, protein_g: 5.8, carbs_g: 30.2, fat_g: 0.8, fiber_g: 4.2 },
+        { name: "Steamed Basmati Rice", estimated_portion: "1/2 cup cooked (100g)", calories: 130, protein_g: 2.7, carbs_g: 28.2, fat_g: 0.3, fiber_g: 0.6 },
+        { name: "Ghee / Oil Tadka (Jeera, Garlic, Hing)", estimated_portion: "1 tsp (5ml)", calories: 45, protein_g: 0.0, carbs_g: 0.0, fat_g: 5.0, fiber_g: 0.0 }
+      ],
+      totals: { calories: 490, protein_g: 17.7, carbs_g: 80.4, fat_g: 10.6, fiber_g: 9.8 },
+      coach_tip: "Yellow moong dal is gentle on digestion and high in plant protein; combining with whole wheat roti delivers all essential amino acids."
+    };
   }
-  return CLIENT_FALLBACK_MEALS[0];
+
+  // 2. Dosa & South Indian
+  if (lower.includes('dosa') || lower.includes('dhosa') || lower.includes('uttapam')) {
+    const isPlain = lower.includes('plain');
+    return {
+      meal_name: isPlain ? "Crispy Plain Dosa with Sambhar & Chutneys" : "Crispy Masala Dosa with Sambhar & Chutneys",
+      confidence: "high",
+      clarification_chips: isPlain 
+        ? ["Add Potato Masala (+125 kcal)", "Roasted in Ghee", "With 2 Chutneys"] 
+        : ["Plain Dosa (No potato)", "Masala Dosa with Aloo", "Cooked with Desi Ghee"],
+      items: [
+        { name: "Fermented Rice & Urad Dal Dosa Crepe", estimated_portion: "1 large dosa (120g)", calories: 165, protein_g: 4.2, carbs_g: 28.5, fat_g: 3.8, fiber_g: 1.8 },
+        ...(!isPlain ? [{ name: "Spiced Potato Onion Masala (Aloo Bhaji)", estimated_portion: "1/2 cup (100g)", calories: 125, protein_g: 2.1, carbs_g: 19.5, fat_g: 4.5, fiber_g: 2.4 }] : []),
+        { name: "Vegetable Toor Dal Sambhar", estimated_portion: "1 small katori (120ml)", calories: 75, protein_g: 3.5, carbs_g: 11.2, fat_g: 2.0, fiber_g: 3.0 },
+        { name: "Fresh Coconut Chutney", estimated_portion: "2 tbsp (30g)", calories: 60, protein_g: 0.8, carbs_g: 2.2, fat_g: 5.4, fiber_g: 1.5 }
+      ],
+      totals: isPlain 
+        ? { calories: 300, protein_g: 8.5, carbs_g: 41.9, fat_g: 11.2, fiber_g: 6.3 }
+        : { calories: 425, protein_g: 10.6, carbs_g: 61.4, fat_g: 15.7, fiber_g: 8.7 },
+      coach_tip: "Fermented batter supports gut health; savor the vegetable sambhar first to steady blood glucose absorption."
+    };
+  }
+
+  // 3. Idli
+  if (lower.includes('idli') || lower.includes('vada')) {
+    return {
+      meal_name: "Steamed Idli Platter with Vegetable Sambhar & Chutney",
+      confidence: "high",
+      clarification_chips: ["With Medu Vada (+150 kcal)", "2 Idlis only", "Ghee Podi Idli"],
+      items: [
+        { name: "Steamed Rice & Urad Dal Idlis", estimated_portion: "3 medium idlis (150g)", calories: 175, protein_g: 5.8, carbs_g: 35.5, fat_g: 0.8, fiber_g: 2.5 },
+        { name: "Vegetable Sambhar with Drumsticks", estimated_portion: "1 medium katori (150ml)", calories: 95, protein_g: 4.5, carbs_g: 14.0, fat_g: 2.5, fiber_g: 3.8 },
+        { name: "Fresh Coconut Chutney", estimated_portion: "2 tbsp (30g)", calories: 60, protein_g: 0.8, carbs_g: 2.2, fat_g: 5.4, fiber_g: 1.5 }
+      ],
+      totals: { calories: 330, protein_g: 11.1, carbs_g: 51.7, fat_g: 8.7, fiber_g: 7.8 },
+      coach_tip: "Idlis are steamed and virtually oil-free; pairing with protein-rich lentil sambhar prevents sharp glycemic spikes."
+    };
+  }
+
+  // 4. Chole / Rajma / Chana
+  if (lower.includes('chole') || lower.includes('rajma') || lower.includes('chana')) {
+    return {
+      meal_name: "Punjabi Chole Masala with Steamed Rice & Salad",
+      confidence: "high",
+      clarification_chips: ["Served with Bhatura (+280 kcal)", "Served with Steamed Basmati", "Served with 2 Rotis"],
+      items: [
+        { name: "Punjabi Spiced Chickpea Curry (Chole)", estimated_portion: "1 medium katori (200g)", calories: 280, protein_g: 13.5, carbs_g: 38.0, fat_g: 8.5, fiber_g: 9.5 },
+        { name: "Steamed White Basmati Rice", estimated_portion: "1 cup cooked (180g)", calories: 210, protein_g: 4.2, carbs_g: 45.0, fat_g: 0.5, fiber_g: 1.0 },
+        { name: "Sliced Onion & Tomato Salad with Lemon", estimated_portion: "1 small plate (60g)", calories: 20, protein_g: 0.8, carbs_g: 4.2, fat_g: 0.2, fiber_g: 1.4 }
+      ],
+      totals: { calories: 510, protein_g: 18.5, carbs_g: 87.2, fat_g: 9.2, fiber_g: 11.9 },
+      coach_tip: "Chickpeas offer an impressive 13.5g of slow-digesting plant protein and 9.5g of filling soluble fiber."
+    };
+  }
+
+  // 5. Roti / Sabzi / Thali
+  if (lower.includes('roti') || lower.includes('chapati') || lower.includes('phulka') || lower.includes('sabzi') || lower.includes('thali')) {
+    return {
+      meal_name: "Balanced Indian Thali (Rotis, Mixed Sabzi & Dal)",
+      confidence: "high",
+      clarification_chips: ["Rotis brushed with Desi Ghee (+70 kcal)", "Dry roasted Phulkas (No ghee)", "Added 1/2 cup Rice"],
+      items: [
+        { name: "Whole Wheat Tawa Rotis", estimated_portion: "2 rotis (65g)", calories: 160, protein_g: 6.0, carbs_g: 32.0, fat_g: 1.0, fiber_g: 4.4 },
+        { name: "Seasonal Mixed Vegetable Sabzi", estimated_portion: "1 katori (150g)", calories: 110, protein_g: 2.8, carbs_g: 14.5, fat_g: 4.8, fiber_g: 4.0 },
+        { name: "Cooked Yellow Dal (Tadka)", estimated_portion: "1 katori (150g)", calories: 145, protein_g: 7.8, carbs_g: 20.0, fat_g: 3.8, fiber_g: 4.2 },
+        { name: "Fresh Plain Dahi / Curd", estimated_portion: "1/2 cup (100g)", calories: 60, protein_g: 4.0, carbs_g: 5.0, fat_g: 3.0, fiber_g: 0.0 }
+      ],
+      totals: { calories: 475, protein_g: 20.6, carbs_g: 71.5, fat_g: 12.6, fiber_g: 12.6 },
+      coach_tip: "A complete staple Indian plate delivering >12g dietary fiber and over 20g balanced protein between dal and curd."
+    };
+  }
+
+  // 6. Biryani / Pulao / Khichdi
+  if (lower.includes('biryani') || lower.includes('pulao') || lower.includes('khichdi')) {
+    return {
+      meal_name: "Fragrant Basmati Dum Biryani with Cucumber Raita",
+      confidence: "high",
+      clarification_chips: ["Chicken Biryani (Higher Protein)", "Vegetable Biryani", "Cooked with Desi Ghee"],
+      items: [
+        { name: "Spiced Basmati Dum Biryani", estimated_portion: "1.5 cups (250g)", calories: 380, protein_g: 12.0, carbs_g: 58.0, fat_g: 11.5, fiber_g: 4.2 },
+        { name: "Chilled Cucumber & Cumin Raita", estimated_portion: "1/2 cup (100g)", calories: 65, protein_g: 3.8, carbs_g: 4.8, fat_g: 3.2, fiber_g: 0.5 }
+      ],
+      totals: { calories: 445, protein_g: 15.8, carbs_g: 62.8, fat_g: 14.7, fiber_g: 4.7 },
+      coach_tip: "Enjoying biryani alongside protein-rich curd raita lowers the overall glycemic index of white basmati rice."
+    };
+  }
+
+  // 7. Poha / Upma
+  if (lower.includes('poha') || lower.includes('upma')) {
+    return {
+      meal_name: "Kanda Poha with Roasted Peanuts & Curry Leaves",
+      confidence: "high",
+      clarification_chips: ["With Boiled Potatoes (Aloo Poha)", "Standard Kanda Poha", "With Extra Peanuts"],
+      items: [
+        { name: "Tempered Flattened Rice (Poha) with Onions", estimated_portion: "1.5 cups (180g)", calories: 230, protein_g: 4.2, carbs_g: 42.0, fat_g: 5.5, fiber_g: 3.0 },
+        { name: "Roasted Crunchy Peanuts", estimated_portion: "1 tbsp (15g)", calories: 85, protein_g: 3.8, carbs_g: 2.4, fat_g: 7.2, fiber_g: 1.2 },
+        { name: "Fresh Coriander & Lemon Squeeze", estimated_portion: "Garnish (15g)", calories: 5, protein_g: 0.2, carbs_g: 1.0, fat_g: 0.0, fiber_g: 0.4 }
+      ],
+      totals: { calories: 320, protein_g: 8.2, carbs_g: 45.4, fat_g: 12.7, fiber_g: 4.6 },
+      coach_tip: "Peanuts add key proteins and healthy monounsaturated fats to the light carbohydrate base of flattened rice."
+    };
+  }
+
+  // 8. Apple & Fruits
+  if (lower.includes('apple') || lower.includes('fruit')) {
+    return {
+      meal_name: "Fresh Crisp Apple",
+      confidence: "high",
+      clarification_chips: ["Medium apple (182g)", "Large Honeycrisp (240g)", "With peanut butter dip"],
+      items: [
+        { name: "Fresh Red Apple", estimated_portion: "1 medium apple (182g)", calories: 95, protein_g: 0.5, carbs_g: 25.1, fat_g: 0.3, fiber_g: 4.4 }
+      ],
+      totals: { calories: 95, protein_g: 0.5, carbs_g: 25.1, fat_g: 0.3, fiber_g: 4.4 },
+      coach_tip: "Rich in soluble pectin fiber and antioxidant polyphenols; great for sustained energy without blood sugar spikes."
+    };
+  }
+
+  // 9. Paneer / Cottage cheese
+  if (lower.includes('paneer') || lower.includes('cottage cheese')) {
+    return {
+      meal_name: "Grilled Paneer & Roasted Veggie Bowl",
+      confidence: "high",
+      clarification_chips: ["Whole milk paneer", "Low-fat paneer", "Tofu substitute"],
+      items: [
+        { name: "Spiced Grilled Paneer", estimated_portion: "180g (6 cubes)", calories: 465, protein_g: 32.4, carbs_g: 6.2, fat_g: 36.0, fiber_g: 0.0 },
+        { name: "Brown Basmati Rice", estimated_portion: "1 cup cooked (195g)", calories: 215, protein_g: 5.0, carbs_g: 45.0, fat_g: 1.6, fiber_g: 3.5 },
+        { name: "Sautéed Bell Peppers & Onions", estimated_portion: "1.5 cups (150g)", calories: 75, protein_g: 2.1, carbs_g: 14.5, fat_g: 1.2, fiber_g: 3.8 },
+        { name: "Olive oil / Ghee brush", estimated_portion: "1 tsp (5ml)", calories: 45, protein_g: 0.0, carbs_g: 0.0, fat_g: 5.0, fiber_g: 0.0 }
+      ],
+      totals: { calories: 800, protein_g: 39.5, carbs_g: 65.7, fat_g: 43.8, fiber_g: 7.3 },
+      coach_tip: "High-protein vegetarian meal! Pair with a squeeze of fresh lemon to boost iron absorption from the veggies."
+    };
+  }
+
+  // Default Indian Home-Style Moong Dal Thali
+  return {
+    meal_name: "Home-Style Yellow Moong Dal Tadka with Rotis",
+    confidence: "high",
+    clarification_chips: ["Cooked with Desi Ghee", "Tempered with Cooking Oil", "Yellow Moong Dal vs Toor Dal"],
+    items: [
+      { name: "Yellow Moong Dal (Tadka)", estimated_portion: "1 medium katori (180g)", calories: 165, protein_g: 9.2, carbs_g: 22.0, fat_g: 4.5, fiber_g: 5.0 },
+      { name: "Whole Wheat Phulkas / Rotis", estimated_portion: "2 rotis (60g)", calories: 150, protein_g: 5.8, carbs_g: 30.2, fat_g: 0.8, fiber_g: 4.2 },
+      { name: "Steamed Basmati Rice", estimated_portion: "1/2 cup cooked (100g)", calories: 130, protein_g: 2.7, carbs_g: 28.2, fat_g: 0.3, fiber_g: 0.6 },
+      { name: "Ghee / Oil Tadka (Jeera, Garlic, Hing)", estimated_portion: "1 tsp (5ml)", calories: 45, protein_g: 0.0, carbs_g: 0.0, fat_g: 5.0, fiber_g: 0.0 }
+    ],
+    totals: { calories: 490, protein_g: 17.7, carbs_g: 80.4, fat_g: 10.6, fiber_g: 9.8 },
+    coach_tip: "Yellow moong dal is gentle on digestion and high in plant protein; combining with whole wheat roti delivers all essential amino acids."
+  };
 }

@@ -6,6 +6,7 @@ import CameraModal from './components/CameraModal';
 import PlateEditor from './components/PlateEditor';
 import GoalSettingsModal from './components/GoalSettingsModal';
 import BackupModal from './components/BackupModal';
+import ApiSettingsModal from './components/ApiSettingsModal';
 
 import { 
   getStoredGoals, 
@@ -34,6 +35,7 @@ export default function App() {
   const [pendingPreviewUrl, setPendingPreviewUrl] = useState(null);
   const [isGoalsOpen, setIsGoalsOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
+  const [isApiSettingsOpen, setIsApiSettingsOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   // Initial theme sync
@@ -46,14 +48,15 @@ export default function App() {
     setMeals(getLogsForDate(currentDate));
   }, [currentDate]);
 
-  // Check backend health periodically / on mount
+  // Check backend/client health
+  const refreshHealth = async () => {
+    const status = await checkBackendHealth();
+    setBackendStatus(status);
+  };
+
   useEffect(() => {
-    const checkHealth = async () => {
-      const status = await checkBackendHealth();
-      setBackendStatus(status);
-    };
-    checkHealth();
-    const timer = setInterval(checkHealth, 30000);
+    refreshHealth();
+    const timer = setInterval(refreshHealth, 30000);
     return () => clearInterval(timer);
   }, []);
 
@@ -118,6 +121,7 @@ export default function App() {
         setIsDark={setIsDark}
         onOpenGoals={() => setIsGoalsOpen(true)}
         onOpenBackup={() => setIsBackupOpen(true)}
+        onOpenApiSettings={() => setIsApiSettingsOpen(true)}
       />
 
       {/* Main Container */}
@@ -200,6 +204,13 @@ export default function App() {
         isOpen={isBackupOpen}
         onClose={() => setIsBackupOpen(false)}
         onDataRestored={handleDataRestored}
+      />
+
+      {/* 5. API Configuration Modal */}
+      <ApiSettingsModal
+        isOpen={isApiSettingsOpen}
+        onClose={() => setIsApiSettingsOpen(false)}
+        onSettingsSaved={refreshHealth}
       />
 
     </div>

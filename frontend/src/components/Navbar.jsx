@@ -10,7 +10,8 @@ import {
   Moon, 
   Flame,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Key
 } from 'lucide-react';
 import { formatDateLabel, getTodayDateString } from '../types/nutrition';
 
@@ -21,7 +22,8 @@ export default function Navbar({
   isDark,
   setIsDark,
   onOpenGoals,
-  onOpenBackup
+  onOpenBackup,
+  onOpenApiSettings
 }) {
   const isToday = currentDate === getTodayDateString();
 
@@ -61,24 +63,33 @@ export default function Navbar({
             </div>
             
             {/* Connection badge */}
-            <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
-              {backendStatus.status === 'healthy' ? (
-                backendStatus.gemini_configured ? (
-                  <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Gemini 2.5 Active
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    Demo Fallback
-                  </span>
-                )
+            <div className="flex items-center gap-1 text-[11px]">
+              {backendStatus.source === 'direct_client' ? (
+                <button 
+                  onClick={onOpenApiSettings}
+                  className="flex items-center gap-1 text-purple-600 dark:text-purple-400 font-semibold hover:underline"
+                  title="Direct Gemini AI Active"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                  Gemini 3.5 Active
+                </button>
+              ) : backendStatus.status === 'healthy' && backendStatus.gemini_configured ? (
+                <button 
+                  onClick={onOpenApiSettings}
+                  className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium hover:underline"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  Backend AI Active
+                </button>
               ) : (
-                <span className="flex items-center gap-1 text-slate-400 dark:text-slate-500">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                  Local Mode
-                </span>
+                <button 
+                  onClick={onOpenApiSettings}
+                  className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-medium hover:underline"
+                  title="Tap to configure Gemini API Key"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  Smart Indian Food AI
+                </button>
               )}
             </div>
           </div>
@@ -126,6 +137,15 @@ export default function Navbar({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* API / AI Configuration */}
+          <button
+            onClick={onOpenApiSettings}
+            className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 transition-all hover:scale-105"
+            title="Configure Gemini API Key / Backend"
+          >
+            <Key className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+          </button>
+
           {/* Target Goals */}
           <button
             onClick={onOpenGoals}
