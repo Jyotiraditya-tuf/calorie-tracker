@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import MacroDashboard from './components/MacroDashboard';
 import MealTimeline from './components/MealTimeline';
@@ -7,6 +7,7 @@ import PlateEditor from './components/PlateEditor';
 import GoalSettingsModal from './components/GoalSettingsModal';
 import BackupModal from './components/BackupModal';
 import ApiSettingsModal from './components/ApiSettingsModal';
+import CloudSyncModal from './components/CloudSyncModal';
 
 import { 
   getStoredGoals, 
@@ -18,6 +19,7 @@ import {
   setThemePreference 
 } from './services/storage';
 import { checkBackendHealth, analyzeMealFood } from './services/api';
+import { getActiveSyncId, performTwoWaySync } from './services/cloudSync';
 import { getTodayDateString } from './types/nutrition';
 import { Camera, Sparkles, Plus, AlertCircle } from 'lucide-react';
 
@@ -27,6 +29,7 @@ export default function App() {
   const [meals, setMeals] = useState([]);
   const [backendStatus, setBackendStatus] = useState({ status: 'checking', gemini_configured: false });
   const [isDark, setIsDark] = useState(getThemePreference);
+  const [activeSyncId, setActiveSyncId] = useState(getActiveSyncId);
 
   // Modal open states
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -36,6 +39,7 @@ export default function App() {
   const [isGoalsOpen, setIsGoalsOpen] = useState(false);
   const [isBackupOpen, setIsBackupOpen] = useState(false);
   const [isApiSettingsOpen, setIsApiSettingsOpen] = useState(false);
+  const [isCloudSyncOpen, setIsCloudSyncOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   // Initial theme sync
@@ -44,9 +48,13 @@ export default function App() {
   }, [isDark]);
 
   // Load meals on date change
-  useEffect(() => {
+  const reloadDateMeals = useCallback(() => {
     setMeals(getLogsForDate(currentDate));
   }, [currentDate]);
+
+  useEffect(() => {
+    reloadDateMeals();
+  }, [reloadDateMeals]);
 
   // Check backend/client health
   const refreshHealth = async () => {
@@ -60,10 +68,44 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // Background Cloud Sync on start if user has a Sync Code
+  useEffect(() => {
+    const runInitialSync = async () => {
+      const code = getActiveSyncId();
+      setActiveSyncId(code);
+      if (code) {
+        try {
+          const res = await performTwoWaySync();
+          if (res?.success) {
+            setGoals(getStoredGoals());
+            reloadDateMeals();
+          }
+        } catch (e) {
+          console.warn("Initial cloud sync check:", e);
+        }
+      }
+    };
+    runInitialSync();
+  }, [reloadDateMeals]);
+
+  // Trigger background cloud sync whenever local data changes
+  const triggerBackgroundSync = useCallback(async () => {
+    const code = getActiveSyncId();
+    setActiveSyncId(code);
+    if (code) {
+      try {
+        await performTwoWaySync();
+      } catch (e) {
+        console.warn("Background auto-sync:", e);
+      }
+    }
+  }, []);
+
   // Handle Goal Update
   const handleSaveGoals = (newGoals) => {
     setGoals(newGoals);
     saveStoredGoals(newGoals);
+    triggerBackgroundSync();
   };
 
   // Open camera logger for specific category
@@ -95,18 +137,21 @@ export default function App() {
     setMeals(updatedDayLogs);
     setPendingAnalysis(null);
     setPendingPreviewUrl(null);
+    triggerBackgroundSync();
   };
 
   // Delete a meal entry
   const handleDeleteMeal = (mealId) => {
     const updated = deleteMealForDate(currentDate, mealId);
     setMeals(updated);
+    triggerBackgroundSync();
   };
 
-  // Reload data after restore
-  const handleDataRestored = () => {
+  // Reload data after restore or cloud sync
+  const handleDataReload = () => {
     setGoals(getStoredGoals());
-    setMeals(getLogsForDate(currentDate));
+    reloadDateMeals();
+    setActiveSyncId(getActiveSyncId());
   };
 
   return (
@@ -122,6 +167,8 @@ export default function App() {
         onOpenGoals={() => setIsGoalsOpen(true)}
         onOpenBackup={() => setIsBackupOpen(true)}
         onOpenApiSettings={() => setIsApiSettingsOpen(true)}
+        onOpenCloudSync={() => setIsCloudSyncOpen(true)}
+        syncId={activeSyncId}
       />
 
       {/* Main Container */}
@@ -203,7 +250,7 @@ export default function App() {
       <BackupModal
         isOpen={isBackupOpen}
         onClose={() => setIsBackupOpen(false)}
-        onDataRestored={handleDataRestored}
+        onDataRestored={handleDataReload}
       />
 
       {/* 5. API Configuration Modal */}
@@ -211,6 +258,13 @@ export default function App() {
         isOpen={isApiSettingsOpen}
         onClose={() => setIsApiSettingsOpen(false)}
         onSettingsSaved={refreshHealth}
+      />
+
+      {/* 6. Multi-Device Cloud Sync Modal */}
+      <CloudSyncModal
+        isOpen={isCloudSyncOpen}
+        onClose={() => setIsCloudSyncOpen(false)}
+        onSyncComplete={handleDataReload}
       />
 
     </div>

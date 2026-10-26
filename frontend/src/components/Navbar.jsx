@@ -11,7 +11,9 @@ import {
   Flame,
   CheckCircle2,
   AlertCircle,
-  Key
+  Key,
+  Cloud,
+  CloudCheck
 } from 'lucide-react';
 import { formatDateLabel, getTodayDateString } from '../types/nutrition';
 
@@ -23,7 +25,9 @@ export default function Navbar({
   setIsDark,
   onOpenGoals,
   onOpenBackup,
-  onOpenApiSettings
+  onOpenApiSettings,
+  onOpenCloudSync,
+  syncId
 }) {
   const isToday = currentDate === getTodayDateString();
 
@@ -136,7 +140,21 @@ export default function Navbar({
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1 sm:gap-1.5">
+          {/* Cloud Sync Button */}
+          <button
+            onClick={onOpenCloudSync}
+            className={`p-2 rounded-xl border transition-all hover:scale-105 flex items-center gap-1 ${
+              syncId
+                ? 'bg-cyan-50 dark:bg-cyan-950/50 border-cyan-400/80 text-cyan-600 dark:text-cyan-400'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-slate-200/80 dark:border-slate-700/80'
+            }`}
+            title={syncId ? `Cloud Synced (${syncId})` : "Configure Cloud Sync"}
+          >
+            <Cloud className="w-4 h-4" />
+            {syncId && <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 animate-pulse hidden sm:inline" />}
+          </button>
+
           {/* API / AI Configuration */}
           <button
             onClick={onOpenApiSettings}
@@ -161,7 +179,7 @@ export default function Navbar({
             className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 transition-all hover:scale-105"
             title="Backup & Restore Data"
           >
-            <Database className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+            <Database className="w-4 h-4 text-slate-500 dark:text-slate-400" />
           </button>
 
           {/* Dark Mode */}
