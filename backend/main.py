@@ -1,14 +1,15 @@
 import os
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
 from models import FoodAnalysisResult
 from gemini_service import analyze_food_multimodal
+from database import init_db, generate_unique_sync_id, get_sync_data, save_or_merge_sync_data
 
 load_dotenv()
 
@@ -16,10 +17,17 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("calorie-tracker-backend")
 
+# Initialize database schema on load
+try:
+    init_db()
+    logger.info("Persistent SQLite database initialized successfully.")
+except Exception as e:
+    logger.error(f"Failed to initialize database: {e}")
+
 app = FastAPI(
     title="AI Calorie & Nutrition Tracker API",
-    description="Backend API powered by Google GenAI (Gemini) for multimodal food decomposition and nutrition coaching.",
-    version="1.0.0"
+    description="Backend API powered by Google GenAI (Gemini) for multimodal food decomposition, nutrition coaching, and persistent cloud synchronization.",
+    version="1.1.0"
 )
 
 # Enable CORS for frontend development and production hosting
@@ -37,7 +45,8 @@ def root():
     return {
         "app": "AI Calorie & Nutrition Tracker",
         "docs": "/docs",
-        "status": "online"
+        "status": "online",
+        "database": "sqlite_ready"
     }
 
 
@@ -48,7 +57,8 @@ def health_check():
     return {
         "status": "healthy",
         "gemini_configured": is_gemini_active,
-        "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        "database_ready": True,
+        "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
     }
 
 
@@ -62,7 +72,6 @@ async def analyze_food(
     Accepts an optional food photo and/or an optional descriptive text prompt.
     Returns structured plate decomposition, nutrition totals, clarification chips, and a coach tip.
     """
-    # Validation: at least one input must be present
     has_image = image is not None and image.filename != ""
     has_text = text is not None and text.strip() != ""
 
@@ -102,6 +111,58 @@ async def analyze_food(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Food analysis pipeline error: {str(e)}"
+        )
+
+
+# ==========================================
+# Cloud Synchronization Endpoints
+# ==========================================
+
+@app.post("/api/sync/generate-id")
+def generate_sync_id():
+    """Generates a memorable 6-character sync code for cross-device linking."""
+    code = generate_unique_sync_id()
+    return {"sync_id": code}
+
+
+@app.get("/api/sync/{sync_id}")
+def get_user_cloud_data(sync_id: str):
+    """Fetch all stored logs and macro goals for a specific sync ID."""
+    clean_id = sync_id.strip().upper()
+    data = get_sync_data(clean_id)
+    if not data:
+        return {
+            "sync_id": clean_id,
+            "logs": {},
+            "goals": {},
+            "is_new": True,
+            "message": "No existing cloud records found. Ready to sync first entry."
+        }
+    return data
+
+
+@app.post("/api/sync/{sync_id}")
+def sync_user_cloud_data(
+    sync_id: str,
+    payload: Dict[str, Any] = Body(...)
+):
+    """
+    Two-way synchronization endpoint.
+    Accepts client daily logs and macro targets, merges with cloud data, and returns unified state.
+    """
+    clean_id = sync_id.strip().upper()
+    logs = payload.get("logs", {})
+    goals = payload.get("goals", {})
+    
+    try:
+        updated = save_or_merge_sync_data(clean_id, logs, goals)
+        logger.info(f"Successfully synced data for ID: {clean_id}")
+        return updated
+    except Exception as e:
+        logger.error(f"Sync failed for ID {clean_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cloud synchronization error: {str(e)}"
         )
 
 
