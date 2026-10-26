@@ -4,31 +4,33 @@
 [![React](https://img.shields.io/badge/Frontend-React_19_+_Vite-blue?style=for-the-badge&logo=react)](https://calorie-tracker-theta-lemon.vercel.app/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi)](https://calorie-tracker-theta-lemon.vercel.app/)
 [![Gemini](https://img.shields.io/badge/AI-Google_Gemini-8E75C2?style=for-the-badge&logo=googlegemini)](https://calorie-tracker-theta-lemon.vercel.app/)
+[![Database](https://img.shields.io/badge/Storage-Cloud_Sync_+_SQLite-003B57?style=for-the-badge&logo=sqlite)](https://calorie-tracker-theta-lemon.vercel.app/)
 
 > **🌐 Live Deployment:** [https://calorie-tracker-theta-lemon.vercel.app/](https://calorie-tracker-theta-lemon.vercel.app/)
 
-A full-stack, multimodal AI Calorie and Nutrition Tracker web application built with **Python FastAPI** and **React (Vite) + Tailwind CSS**, powered by the Google GenAI SDK (`gemini-3.5-flash`) with structured outputs for real-time plate decomposition, macro estimation, and dynamic nutrition coaching.
+A full-stack, multimodal AI Calorie and Nutrition Tracker web application built with **Python FastAPI** and **React (Vite) + Tailwind CSS**, powered by the Google GenAI SDK (`gemini-3.5-flash`) with structured outputs for real-time plate decomposition, macro estimation, dynamic nutrition coaching, and persistent multi-device cloud synchronization.
 
 ---
 
 ## Highlights & Features
 
 - **Multimodal AI Plate Decomposition (`gemini-3.5-flash`)**:
-  - Upload a meal photo, snap directly using HTML5 camera (`facingMode: "environment"`), or enter descriptive food notes.
+  - Upload a meal photo, snap directly using HTML5 camera (`facingMode: "environment"`) or 1-tap phone camera capture, or enter descriptive food notes.
   - Automatically identifies, separates, and decomposes complex plates into distinct food components with estimated portions and macros.
+  - Specifically trained with deep clinical knowledge for Indian dishes (Yellow Moong Dal, Masala Dosa, Sambhar, Chutneys, Phulkas, Chole, Poha, Biryani) and international cuisines.
   - Dynamic fallback architecture ensures high-throughput reliability across `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-flash-lite-latest`.
 - **USP 1: Interactive Multi-Item Plate Editor**:
   - Review decomposed plate components prior to logging.
   - Adjust portion multipliers (`0.75x`, `1.25x`, `1.5x`), edit macros inline, remove false detections, or add missing ingredients with live recalculation.
 - **USP 2: 1-Tap Clarification Chips**:
-  - When visual confidence is medium or low due to preparation ambiguity (e.g. whole milk vs. skim milk, oil-free vs. butter sautéed), clickable clarification chips let you refine the meal with one tap.
+  - When visual confidence is medium or low due to preparation ambiguity (e.g. whole milk vs. skim milk, oil-free vs. butter sautéed, ghee tadka vs. oil), clickable clarification chips let you refine the meal with one tap.
 - **USP 3: Dynamic Macro Coaching Bar**:
   - Real-time comparison against customizable daily targets (Calories, Protein, Carbs, Fat, Fiber).
   - Contextual nutrition advice adapting to remaining macronutrient deficits before your next meal.
-- **Full-Day Tracking & Persistence**:
-  - Grouped meal slots (`Breakfast`, `Lunch`, `Dinner`, `Snacks`) with timestamps.
-  - Multi-day calendar navigator (`YYYY-MM-DD`).
-  - Offline-ready `localStorage` persistence with one-click JSON backup export and restore.
+- **Multi-Device Cloud Synchronization (Permanent Storage)**:
+  - Local-first architecture: instant offline responsiveness with automatic background cloud synchronization.
+  - **1-Tap Sync Code Pairing**: Generate a memorable Sync Code (e.g., `NUTRI-AB8921`) and enter it on your phone or laptop to automatically link and synchronize all your meals and targets.
+  - Supports FastAPI SQLite database sync, Firebase Firestore cloud sync, and offline JSON backup export/restore.
 - **Graceful Fallback**:
   - Includes a fallback mock engine so the UI works seamlessly for development and testing even before a Gemini API key is configured or when offline.
 
@@ -39,7 +41,8 @@ A full-stack, multimodal AI Calorie and Nutrition Tracker web application built 
 ```
 calorie-tracker/
 ├── backend/
-│   ├── main.py              # FastAPI app with CORS & /api/analyze endpoint
+│   ├── main.py              # FastAPI app with CORS, /api/analyze & /api/sync endpoints
+│   ├── database.py          # Persistent SQLite database & two-way sync engine
 │   ├── models.py            # Pydantic schemas (FoodItem, MealTotals, FoodAnalysisResult)
 │   ├── gemini_service.py    # Google GenAI SDK integration with structured outputs
 │   └── requirements.txt     # Backend dependencies
@@ -59,14 +62,30 @@ calorie-tracker/
 │   │   │   ├── ClarificationChips.jsx
 │   │   │   ├── MealTimeline.jsx
 │   │   │   ├── GoalSettingsModal.jsx
-│   │   │   └── BackupModal.jsx
-│   │   ├── services/        # API client and localStorage persistence
+│   │   │   ├── BackupModal.jsx
+│   │   │   ├── ApiSettingsModal.jsx
+│   │   │   └── CloudSyncModal.jsx
+│   │   ├── services/        # API client, localStorage, and cloudSync engine
 │   │   └── types/           # Preset goals, categories, and utility helpers
 │   └── package.json
 ├── .env.example             # Environment variable template
 ├── .gitignore               # Clean root git ignore
 └── README.md                # Project documentation
 ```
+
+---
+
+## Multi-Device Cloud Synchronization
+
+NutriLens uses a **Local-First + Cloud-Sync** hybrid architecture:
+1. **Instant Offline Speed**: Meals are saved immediately to device storage so the interface never stutters or lags.
+2. **Device Pairing with Sync Code**:
+   - Tap the **Cloud icon (☁️)** in the top navigation bar.
+   - Click **"Generate Code"** to receive your unique Sync Code (e.g. `NUTRI-XY8421`).
+   - Enter that same code on any other phone, tablet, or PC to link them.
+   - All meal entries, portion adjustments, and macro targets automatically merge across devices!
+3. **Enterprise Firebase Firestore (Optional)**:
+   - Provide your Firebase Project ID and Web API Key in the Cloud Sync Modal to store your data directly in your private Firebase Firestore cloud.
 
 ---
 
@@ -145,6 +164,7 @@ Returns service status and Gemini API key configuration:
 {
   "status": "healthy",
   "gemini_configured": true,
+  "database_ready": true,
   "model": "gemini-3.5-flash"
 }
 ```
@@ -152,45 +172,26 @@ Returns service status and Gemini API key configuration:
 ### `POST /api/analyze`
 Multimodal food analysis endpoint:
 - **`image`** (Multipart file, optional): Image of plate or food item.
-- **`text`** (Form string, optional): Optional context (e.g. *"200g grilled paneer with brown basmati rice and 1 tsp olive oil"*).
+- **`text`** (Form string, optional): Optional context (e.g. *"1 katori yellow moong dal tadka with 2 rotis"*).
 
-**Response format (`FoodAnalysisResult`):**
+### `POST /api/sync/generate-id`
+Generates a unique 6-character alphanumeric sync code for cross-device linking:
 ```json
 {
-  "meal_name": "Grilled Paneer & Roasted Veggie Bowl",
-  "confidence": "high",
-  "clarification_chips": [
-    "Paneer made with whole milk",
-    "Low-fat paneer",
-    "Tofu substitute"
-  ],
-  "items": [
-    {
-      "name": "Spiced Grilled Paneer",
-      "estimated_portion": "180g (6 cubes)",
-      "calories": 465,
-      "protein_g": 32.4,
-      "carbs_g": 6.2,
-      "fat_g": 36.0,
-      "fiber_g": 0.0
-    },
-    {
-      "name": "Steamed Brown Basmati Rice",
-      "estimated_portion": "1 cup cooked (195g)",
-      "calories": 215,
-      "protein_g": 5.0,
-      "carbs_g": 45.0,
-      "fat_g": 1.6,
-      "fiber_g": 3.5
-    }
-  ],
-  "totals": {
-    "calories": 680,
-    "protein_g": 37.4,
-    "carbs_g": 51.2,
-    "fat_g": 37.6,
-    "fiber_g": 3.5
-  },
-  "coach_tip": "Great high-protein vegetarian meal! Pair with a squeeze of fresh lemon to boost iron absorption from the veggies."
+  "sync_id": "NUTRI-XY8421"
+}
+```
+
+### `GET /api/sync/{sync_id}`
+Fetches all stored meal logs and macro goals for a specific sync ID.
+
+### `POST /api/sync/{sync_id}`
+Synchronizes client logs and targets, merges with cloud data, and returns the unified state:
+```json
+{
+  "sync_id": "NUTRI-XY8421",
+  "logs": { ... },
+  "goals": { ... },
+  "updated_at": "2026-10-26T08:15:00Z"
 }
 ```
