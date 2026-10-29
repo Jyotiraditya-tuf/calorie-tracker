@@ -5,7 +5,6 @@ from typing import Optional
 from dotenv import load_dotenv
 
 from models import FoodAnalysisResult, FoodItem, MealTotals
-from database import format_rl_prompt_instructions, get_all_rl_feedback
 
 load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
@@ -203,28 +202,6 @@ MOCK_MEALS = [
 
 def get_mock_fallback(user_text: Optional[str] = None) -> FoodAnalysisResult:
     """Return an intelligent realistic mock food analysis if GEMINI_API_KEY is unset or API call fails."""
-    # Check RL feedback memory first
-    try:
-        rules = get_all_rl_feedback(limit=5)
-        if user_text:
-            text_lower = user_text.lower()
-            for r in rules:
-                if r["original_name"].lower() in text_lower or r["corrected_name"].lower() in text_lower:
-                    corr = r["corrected_name"]
-                    return FoodAnalysisResult(
-                        meal_name=corr,
-                        confidence="high",
-                        clarification_chips=["Standard portion (1 serving)", "Cooked with Ghee", "Cooked with Oil"],
-                        items=[
-                            FoodItem(name=corr, estimated_portion="1 portion (~200g)", calories=320, protein_g=14.0, carbs_g=40.0, fat_g=11.0, fiber_g=5.5),
-                            FoodItem(name="Accompaniment / Roti", estimated_portion="1 serving", calories=130, protein_g=3.5, carbs_g=25.0, fat_g=2.0, fiber_g=2.5)
-                        ],
-                        totals=MealTotals(calories=450, protein_g=17.5, carbs_g=65.0, fat_g=13.0, fiber_g=8.0),
-                        coach_tip=f"Recalled from your verified correction '{corr}'. Nutritional breakdown adapted to your feedback history."
-                    )
-    except Exception:
-        pass
-
     if user_text:
         text_lower = user_text.lower()
         for meal in MOCK_MEALS:
@@ -304,15 +281,10 @@ def analyze_food_multimodal(
             detected_mime = mime_type or "image/jpeg"
             contents.append(types.Part.from_bytes(data=image_bytes, mime_type=detected_mime))
 
-        # Add text prompt and instructions, augmented with human reinforcement learning memory
+        # Add text prompt and instructions
         user_text = text_prompt or ""
-        rl_instructions = format_rl_prompt_instructions()
-        if rl_instructions:
-            logger.info("Injecting active Reinforcement Learning feedback rules into Gemini prompt.")
-
         prompt_full = (
-            f"{system_instruction}"
-            f"{rl_instructions}\n\n"
+            f"{system_instruction}\n\n"
             f"User Context / Notes: {user_text if user_text else 'Accurately identify all dishes and ingredients in the image, especially if Indian or regional specialties, and decompose into plate components with exact macro estimation.'}"
         )
         contents.append(prompt_full)

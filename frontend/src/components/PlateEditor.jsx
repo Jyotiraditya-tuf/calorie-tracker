@@ -13,12 +13,9 @@ import {
   ChevronDown,
   ChevronUp,
   Sliders,
-  Utensils,
-  Brain,
-  Wand2
+  Utensils
 } from 'lucide-react';
 import ClarificationChips from './ClarificationChips';
-import { submitDishFeedback, getSimulatedFallback } from '../services/api';
 
 export default function PlateEditor({ 
   initialAnalysis, 
@@ -27,7 +24,6 @@ export default function PlateEditor({
   onCancel,
   imagePreviewUrl 
 }) {
-  const originalSuggestedName = initialAnalysis.meal_name || '';
   const [mealName, setMealName] = useState(initialAnalysis.meal_name || 'Logged Meal');
   const [selectedCategory, setSelectedCategory] = useState(category);
   const [items, setItems] = useState(initialAnalysis.items || []);
@@ -35,23 +31,6 @@ export default function PlateEditor({
   const [confidence, setConfidence] = useState(initialAnalysis.confidence || 'high');
   const [chips, setChips] = useState(initialAnalysis.clarification_chips || []);
   const [editingItemId, setEditingItemId] = useState(null);
-
-  // Check if dish name has been corrected by the user compared to AI suggestion
-  const isNameCorrected = 
-    Boolean(originalSuggestedName.trim()) &&
-    mealName.trim().toLowerCase() !== originalSuggestedName.trim().toLowerCase();
-
-  // Auto-adapt plate ingredients and macros to the corrected dish name
-  const handleAdaptIngredients = () => {
-    if (!mealName.trim()) return;
-    const adapted = getSimulatedFallback(mealName.trim());
-    if (adapted && adapted.items && adapted.items.length > 0) {
-      setItems(adapted.items);
-      if (adapted.coach_tip) setCoachTip(adapted.coach_tip);
-      if (adapted.clarification_chips) setChips(adapted.clarification_chips);
-      setConfidence(adapted.confidence || 'high');
-    }
-  };
 
   // New item draft state
   const [isAddingItem, setIsAddingItem] = useState(false);
@@ -162,19 +141,6 @@ export default function PlateEditor({
 
   // Commit to daily log
   const handleConfirm = () => {
-    // If the user corrected the dish name, submit RL feedback for reinforcement learning
-    if (isNameCorrected) {
-      submitDishFeedback({
-        original_name: originalSuggestedName,
-        corrected_name: mealName.trim(),
-        details: {
-          items: items,
-          totals: liveTotals,
-          coach_tip: coachTip
-        }
-      });
-    }
-
     const finalizedMeal = {
       meal_name: mealName,
       category: selectedCategory,
@@ -261,29 +227,6 @@ export default function PlateEditor({
               </select>
             </div>
           </div>
-
-          {/* Reinforcement Learning Banner when user corrects dish name */}
-          {isNameCorrected && (
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-3 rounded-2xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-900 dark:text-purple-200 animate-fade-in text-xs">
-              <div className="flex items-center gap-2">
-                <Brain className="w-4 h-4 text-purple-600 dark:text-purple-400 flex-shrink-0 animate-pulse" />
-                <div>
-                  <span className="font-bold text-purple-700 dark:text-purple-300">RLHF Learning:</span> AI will remember{' '}
-                  <span className="line-through opacity-75">{originalSuggestedName}</span> →{' '}
-                  <span className="font-bold text-purple-900 dark:text-purple-100 underline decoration-purple-400">{mealName}</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleAdaptIngredients}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-95 text-white font-semibold text-xs transition-all shadow-sm flex-shrink-0 self-end sm:self-auto cursor-pointer"
-                title="Automatically adapt plate ingredients and nutrition to the corrected dish name"
-              >
-                <Wand2 className="w-3.5 h-3.5" />
-                Re-align Plate Items
-              </button>
-            </div>
-          )}
 
           {/* 1-Tap Clarification Chips (USP 2) */}
           {confidence !== 'high' && chips.length > 0 && (
