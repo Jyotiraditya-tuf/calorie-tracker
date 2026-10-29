@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +9,15 @@ from dotenv import load_dotenv
 
 from models import FoodAnalysisResult
 from gemini_service import analyze_food_multimodal
-from database import init_db, generate_unique_sync_id, get_sync_data, save_or_merge_sync_data
+from database import (
+    init_db, 
+    generate_unique_sync_id, 
+    get_sync_data, 
+    save_or_merge_sync_data,
+    record_rl_feedback,
+    get_all_rl_feedback,
+    delete_rl_feedback
+)
 
 load_dotenv()
 
@@ -26,8 +34,8 @@ except Exception as e:
 
 app = FastAPI(
     title="AI Calorie & Nutrition Tracker API",
-    description="Backend API powered by Google GenAI (Gemini) for multimodal food decomposition, nutrition coaching, and persistent cloud synchronization.",
-    version="1.1.0"
+    description="Backend API powered by Google GenAI (Gemini) for multimodal food decomposition, nutrition coaching, cloud synchronization, and Reinforcement Learning from Human Feedback (RLHF).",
+    version="1.2.0"
 )
 
 # Enable CORS for frontend development and production hosting
@@ -46,7 +54,8 @@ def root():
         "app": "AI Calorie & Nutrition Tracker",
         "docs": "/docs",
         "status": "online",
-        "database": "sqlite_ready"
+        "database": "sqlite_ready",
+        "features": ["multimodal_analysis", "cloud_sync", "reinforcement_learning"]
     }
 
 
@@ -58,6 +67,7 @@ def health_check():
         "status": "healthy",
         "gemini_configured": is_gemini_active,
         "database_ready": True,
+        "rl_active": True,
         "model": os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
     }
 
@@ -70,7 +80,8 @@ async def analyze_food(
     """
     Multimodal food recognition endpoint.
     Accepts an optional food photo and/or an optional descriptive text prompt.
-    Returns structured plate decomposition, nutrition totals, clarification chips, and a coach tip.
+    Returns structured plate decomposition, nutrition totals, clarification chips, and a coach tip,
+    augmented with active Reinforcement Learning rules learned from past user corrections.
     """
     has_image = image is not None and image.filename != ""
     has_text = text is not None and text.strip() != ""
@@ -112,6 +123,57 @@ async def analyze_food(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Food analysis pipeline error: {str(e)}"
         )
+
+
+# ==========================================
+# Reinforcement Learning & Feedback Endpoints
+# ==========================================
+
+@app.post("/api/feedback")
+def submit_human_feedback(payload: Dict[str, Any] = Body(...)):
+    """
+    Record human feedback / ground-truth correction on a predicted dish name.
+    Expects { "original_name": str, "corrected_name": str, "details": optional dict }.
+    This updates the AI's in-context reinforcement memory for future analyses.
+    """
+    original_name = payload.get("original_name", "").strip()
+    corrected_name = payload.get("corrected_name", "").strip()
+    details = payload.get("details", {})
+
+    if not original_name or not corrected_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both 'original_name' and 'corrected_name' are required."
+        )
+
+    if original_name.lower() == corrected_name.lower():
+        return {"status": "unchanged", "message": "No name change detected."}
+
+    try:
+        result = record_rl_feedback(original_name, corrected_name, details)
+        logger.info(f"RL Feedback recorded: '{original_name}' -> '{corrected_name}' (weight: {result.get('reinforcement_weight')})")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to record RL feedback: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error saving feedback: {str(e)}"
+        )
+
+
+@app.get("/api/feedback")
+def list_learned_feedback(limit: int = 20):
+    """List learned human corrections and their reinforcement weights."""
+    return get_all_rl_feedback(limit=limit)
+
+
+@app.delete("/api/feedback/{feedback_id}")
+def remove_feedback(feedback_id: int):
+    """Delete a learned feedback rule."""
+    success = delete_rl_feedback(feedback_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Feedback rule not found.")
+    return {"status": "deleted", "feedback_id": feedback_id}
 
 
 # ==========================================
